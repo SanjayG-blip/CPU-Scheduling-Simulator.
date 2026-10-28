@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CPU Scheduling Simulator</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1c2333; --muted: #5d6679;
+    --line: #dfe3ea; --accent: #2f5bea; --accent-text: #ffffff; --best: #e3f6e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151c; --card: #1a1f2b; --text: #e7eaf2; --muted: #98a2b8;
+      --line: #2b3242; --accent: #6b8cff; --accent-text: #0e1220; --best: #17331f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 16px; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: center; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: .85rem; }
+  tr:last-child td { border-bottom: 0; }
+  .scroll { overflow-x: auto; }
+  input, select { font: inherit; color: var(--text); background: var(--bg);
+                  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  td input { width: 72px; text-align: center; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; padding: 8px 14px;
+           border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:hover { filter: brightness(1.07); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  .row label { color: var(--muted); }
+  .msg { color: #d33; min-height: 1.3em; margin-top: 8px; font-size: .9rem; }
+  .gantt { display: flex; margin: 8px 0 34px; min-width: 100%; }
+  .seg { position: relative; min-width: 38px; height: 44px; display: flex; align-items: center;
+         justify-content: center; color: #111; font-weight: 600; border: 1px solid rgba(0,0,0,.25); }
+  .seg.idle { background: repeating-linear-gradient(45deg, var(--line), var(--line) 6px, transparent 6px, transparent 12px);
+              color: var(--muted); }
+  .seg .t { position: absolute; left: -2px; bottom: -22px; font-size: .75rem; font-weight: 400; color: var(--muted); }
+  .seg .te { position: absolute; right: -2px; bottom: -22px; font-size: .75rem; font-weight: 400; color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 14px; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .stat b { display: block; font-size: 1.3rem; }
+  .stat span { color: var(--muted); font-size: .8rem; }
+  tr.best td { background: var(--best); }
+  footer { color: var(--muted); font-size: .85rem; margin-top: 24px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CPU Scheduling Simulator</h1>
+  <p class="sub">Interactive demo of the DSA project. The C version (<code>scheduler.c</code>) uses the same algorithms.</p>
+
+  <section class="card">
+    <h2>1. Processes</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>PID</th><th>Arrival</th><th>Burst</th><th>Priority</th><th></th></tr></thead>
+        <tbody id="procBody"></tbody>
+      </table>
+    </div>
+    <div class="row">
+      <button id="addBtn">+ Add process</button>
+      <button id="sampleBtn">Load sample</button>
+      <button id="clearBtn">Clear</button>
+    </div>
+    <p class="sub" style="margin:8px 0 0">Priority: lower number means higher priority (used only by Priority scheduling).</p>
+  </section>
+
+  <section class="card">
+    <h2>2. Run</h2>
+    <div class="row" style="margin-top:0">
+      <label for="algo">Algorithm</label>
+      <select id="algo">
+        <option value="fcfs">FCFS</option>
+        <option value="sjf">SJF (Non-preemptive)</option>
+        <option value="srtf">SRTF (Preemptive SJF)</option>
+        <option value="priority">Priority (Non-preemptive)</option>
+        <option value="rr">Round Robin</option>
+      </select>
+      <label for="quantum" id="qLabel" class="hidden">Quantum</label>
+      <input id="quantum" type="number" min="1" value="2" style="width:70px" class="hidden">
+      <button id="runBtn" class="primary">Run</button>
+      <button id="cmpBtn">Compare all</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </section>
+
+  <section class="card hidden" id="resultCard">
+    <h2 id="resultTitle">Result</h2>
+    <div class="scroll"><div class="gantt" id="gantt"></div></div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>PID</th><th>AT</th><th>BT</th><th>CT</th><th>TAT</th><th>WT</th><th>RT</th></tr></thead>
+        <tbody id="resBody"></tbody>
+      </table>
+    </div>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <section class="card hidden" id="cmpCard">
+    <h2 id="cmpTitle">Comparison</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th style="text-align:left">Algorithm</th><th>Avg WT</th><th>Avg TAT</th><th>Avg RT</th></tr></thead>
+        <tbody id="cmpBody"></tbody>
+      </table>
+    </div>
+    <p class="sub" id="cmpNote" style="margin:10px 0 0"></p>
+  </section>
+
+  <footer>
+    Data structures: circular queue (FCFS, Round Robin) and min-heap (SJF, SRTF, Priority).
+    WT = waiting time, TAT = turnaround time, RT = response time, CT = completion time.
+  </footer>
+</main>
+
+<script>
+/* ---------- Data structure: Min-Heap ---------- */
+class MinHeap {
+  constructor(less) { this.a = []; this.less = less; }
+  get size() { return this.a.length; }
+  push(x) {
+    const a = this.a; a.push(x);
+    let i = a.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (!this.less(a[i], a[p])) break;
+      [a[i], a[p]] = [a[p], a[i]]; i = p;
+    }
+  }
+  pop() {
+    const a = this.a, top = a[0], last = a.pop();
+    if (a.length) {
+      a[0] = last; let i = 0;
+      for (;;) {
+        const l = 2 * i + 1, r = l + 1; let b = i;
+        if (l < a.length && this.less(a[l], a[b])) b = l;
+        if (r < a.length && this.less(a[r], a[b])) b = r;
+        if (b === i) break;
+        [a[i], a[b]] = [a[b], a[i]]; i = b;
+      }
+    }
+    return top;
+  }
+}
+
+/* ---------- Scheduling ---------- */
+const NAMES = {
+  fcfs: "FCFS", sjf: "SJF (Non-preemptive)", srtf: "SRTF (Preemptive SJF)",
+  priority: "Priority (Non-preemptive)", rr: "Round Robin"
+};
+
+function simulate(algo, input, quantum) {
+  const p = input.map(x => ({ ...x, rt: x.bt, first: -1, ct: 0, tat: 0, wt: 0, resp: 0 }));
+  const n = p.length;
+  const order = p.map((_, i) => i).sort((a, b) => p[a].at - p[b].at || p[a].pid - p[b].pid);
+  const gantt = [];
+  const add = (pid, s, e) => {
+    if (e <= s) return;
+    const last = gantt[gantt.length - 1];
+    if (last && last.pid === pid && last.end === s) last.end = e;
+    else gantt.push({ pid, start: s, end: e });
+  };
+
+  const keyOf = algo === "sjf" ? x => x.bt : algo === "priority" ? x => x.pr : x => x.rt;
+  const less = (a, b) => {
+    const ka = keyOf(p[a]), kb = keyOf(p[b]);
+    if (ka !== kb) return ka < kb;
+    if (p[a].at !== p[b].at) return p[a].at < p[b].at;
+    return p[a].pid < p[b].pid;
+  };
+  const useQueue = algo === "fcfs" || algo === "rr";
+  const queue = [], heap = new MinHeap(less);
+  const push = i => useQueue ? queue.push(i) : heap.push(i);
+  const pop = () => useQueue ? queue.shift() : heap.pop();
+  const empty = () => useQueue ? queue.length === 0 : heap.size === 0;
+
+  let t = 0, next = 0, finished = 0;
+  const admit = () => { while (next < n && p[order[next]].at <= t) push(order[next++]); };
+
+  while (finished < n) {
+    admit();
+    if (empty()) {                       // CPU idle until the next arrival
+      const na = p[order[next]].at;
+      add(0, t, na); t = na; continue;
+    }
+    const i = pop();
+    if (p[i].first < 0) p[i].first = t;
+    const run = algo === "srtf" ? 1 : algo === "rr" ? Math.min(quantum, p[i].rt) : p[i].rt;
+    add(p[i].pid, t, t + run);
+    t += run; p[i].rt -= run;
+    if (algo === "rr") admit();          // new arrivals go ahead of the preempted process
+    if (p[i].rt === 0) {
+      p[i].ct = t; p[i].tat = t - p[i].at; p[i].wt = p[i].tat - p[i].bt; p[i].resp = p[i].first - p[i].at;
+      finished++;
+    } else push(i);
+  }
+
+  const avg = f => p.reduce((s, x) => s + f(x), 0) / n;
+  const total = gantt.length ? gantt[gantt.length - 1].end : 0;
+  const busy = p.reduce((s, x) => s + x.bt, 0);
+  return {
+    p, gantt,
+    avgWT: avg(x => x.wt), avgTAT: avg(x => x.tat), avgRT: avg(x => x.resp),
+    util: total ? 100 * busy / total : 0
+  };
+}
+
+/* ---------- UI state ---------- */
+let procs = [];
+const $ = id => document.getElementById(id);
+const fmt = v => v.toFixed(2);
+const color = pid => `hsl(${(pid * 47) % 360} 62% 66%)`;
+
+function renumber() { procs.forEach((x, i) => x.pid = i + 1); }
+
+function renderProcs() {
+  renumber();
+  $("procBody").innerHTML = "";
+  procs.forEach((x, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>P${x.pid}</td>
+      <td><input type="number" min="0" value="${x.at}" data-i="${i}" data-k="at"></td>
+      <td><input type="number" min="1" value="${x.bt}" data-i="${i}" data-k="bt"></td>
+      <td><input type="number" min="1" value="${x.pr}" data-i="${i}" data-k="pr"></td>
+      <td><button data-del="${i}" title="Remove">&times;</button></td>`;
+    $("procBody").appendChild(tr);
+  });
+}
+
+$("procBody").addEventListener("input", e => {
+  const k = e.target.dataset.k;
+  if (k) procs[+e.target.dataset.i][k] = e.target.value === "" ? NaN : Number(e.target.value);
+});
+$("procBody").addEventListener("click", e => {
+  if (e.target.dataset.del !== undefined) { procs.splice(+e.target.dataset.del, 1); renderProcs(); }
+});
+$("addBtn").onclick = () => {
+  if (procs.length >= 20) return showMsg("Maximum 20 processes.");
+  procs.push({ pid: 0, at: 0, bt: 1, pr: 1 }); renderProcs(); showMsg("");
+};
+$("sampleBtn").onclick = () => {
+  const s = [[0, 8, 3], [1, 4, 1], [2, 9, 4], [3, 5, 2], [6, 2, 5]];
+  procs = s.map(([at, bt, pr]) => ({ pid: 0, at, bt, pr })); renderProcs(); showMsg("");
+};
+$("clearBtn").onclick = () => { procs = []; renderProcs(); showMsg(""); };
+$("algo").onchange = () => {
+  const rr = $("algo").value === "rr";
+  $("quantum").classList.toggle("hidden", !rr);
+  $("qLabel").classList.toggle("hidden", !rr);
+};
+
+function showMsg(t) { $("msg").textContent = t; }
+
+function validate() {
+  if (!procs.length) { showMsg("Add at least one process."); return false; }
+  for (const x of procs) {
+    if (![x.at, x.bt, x.pr].every(Number.isInteger) || x.at < 0 || x.bt < 1 || x.pr < 1) {
+      showMsg(`P${x.pid}: arrival must be 0 or more, burst and priority 1 or more (whole numbers).`);
+      return false;
+    }
+  }
+  const q = Number($("quantum").value);
+  if (!Number.isInteger(q) || q < 1) { showMsg("Quantum must be a whole number of 1 or more."); return false; }
+  showMsg(""); return true;
+}
+
+function renderResult(algo, r) {
+  $("resultCard").classList.remove("hidden");
+  $("resultTitle").textContent = NAMES[algo];
+  const g = $("gantt"); g.innerHTML = "";
+  r.gantt.forEach((s, i) => {
+    const d = document.createElement("div");
+    d.className = "seg" + (s.pid === 0 ? " idle" : "");
+    d.style.flex = s.end - s.start;
+    if (s.pid !== 0) d.style.background = color(s.pid);
+    d.innerHTML = (s.pid === 0 ? "IDLE" : "P" + s.pid) + `<span class="t">${s.start}</span>` +
+      (i === r.gantt.length - 1 ? `<span class="te">${s.end}</span>` : "");
+    g.appendChild(d);
+  });
+  $("resBody").innerHTML = r.p.map(x =>
+    `<tr><td>P${x.pid}</td><td>${x.at}</td><td>${x.bt}</td><td>${x.ct}</td><td>${x.tat}</td><td>${x.wt}</td><td>${x.resp}</td></tr>`).join("");
+  $("stats").innerHTML = [
+    ["Avg waiting time", fmt(r.avgWT)], ["Avg turnaround", fmt(r.avgTAT)],
+    ["Avg response", fmt(r.avgRT)], ["CPU utilization", fmt(r.util) + "%"]
+  ].map(([l, v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+}
+
+$("runBtn").onclick = () => {
+  if (!validate()) return;
+  const algo = $("algo").value;
+  renderResult(algo, simulate(algo, procs, Number($("quantum").value)));
+};
+
+$("cmpBtn").onclick = () => {
+  if (!validate()) return;
+  const q = Number($("quantum").value);
+  const rows = Object.keys(NAMES).map(a => ({ a, r: simulate(a, procs, q) }));
+  const best = rows.reduce((m, x) => x.r.avgWT < m.r.avgWT ? x : m, rows[0]);
+  $("cmpCard").classList.remove("hidden");
+  $("cmpTitle").textContent = `Comparison (Round Robin quantum = ${q})`;
+  $("cmpBody").innerHTML = rows.map(({ a, r }) =>
+    `<tr class="${a === best.a ? "best" : ""}"><td style="text-align:left">${NAMES[a]}</td>` +
+    `<td>${fmt(r.avgWT)}</td><td>${fmt(r.avgTAT)}</td><td>${fmt(r.avgRT)}</td></tr>`).join("");
+  $("cmpNote").textContent = `Lowest average waiting time: ${NAMES[best.a]}`;
+};
+
+$("sampleBtn").click();
+</script>
+</body>
+</html>
